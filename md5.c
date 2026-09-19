@@ -173,19 +173,12 @@ int process_input(int fd) {
 	}
 
 	// append original length in bits mod 2^64 to message
-	// turn the byte length into 2 numbers - high bits and low bits
-	uint32_t low_bits = g_byte_count << 3;
-	uint32_t high_bits = g_byte_count >> (32 - 3);
+	uint64_t bits_count = g_byte_count << 3;
 
 	// encode the full 64bit int (bits length) as little endian
-	for (int i = 0; i < 4; i++) {
-		uint8_t byte = low_bits >> (i * 8) & 0xff;
-		DEBUG("low_bits[%d]=%u\n", i, byte);
-		process_byte(byte);
-	}
-	for (int i = 0; i < 4; i++) {
-		uint8_t byte = high_bits >> (i * 8) & 0xff;
-		DEBUG("high_bits[%d]=%u\n", i, byte);
+	for (int i = 0; i < 8; i++) {
+		uint8_t byte = bits_count >> (i * 8);
+		DEBUG("bits_count[%d]=%u\n", i, byte);
 		process_byte(byte);
 	}
 
@@ -205,7 +198,7 @@ void print_hash() {
 		uint32_t word = words[i];
 
 		for (int j = 0; j < 4; j++) {
-			uint8_t byte = word >> (j*8) & 0xff;
+			uint8_t byte = word >> (j*8);
 			printf("%02x", byte);
 		}
 	}
