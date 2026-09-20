@@ -160,6 +160,11 @@ int process_input(int fd) {
 
 		// positive-number we read some stuff
 		// loop data byte-by-byte
+        if (g_debug) {
+            for (int i=curr_idx; i<curr_idx+n; i++) {
+                DEBUG("processing byte: %u\n", buf[i]);
+            }
+        }
 		for (int i = curr_idx; i < curr_idx+n-63; i+=64) {
             process_block(buf+i);
 		}
@@ -174,6 +179,7 @@ int process_input(int fd) {
 	// it and appending the length
 	// pad it with 1 and then a bunch of 0s
 	buf[curr_idx++] = 0x80;
+	DEBUG("processing byte: %u\n", 0x80);
 
 	// check if we have a full block ready for processing
 	if ((curr_idx%64) == 64) {
@@ -181,6 +187,7 @@ int process_input(int fd) {
 	}
 	while ((curr_idx%64) != 56) {
         buf[curr_idx++] = 0;
+	    DEBUG("processing byte: %u\n", 0x0);
 	}
 
 	// append original length in bits mod 2^64 to message
@@ -191,6 +198,7 @@ int process_input(int fd) {
 		uint8_t byte = bits_count >> (i * 8);
 		DEBUG("bits_count[%d]=%u\n", i, byte);
         buf[curr_idx++] = byte;
+	    DEBUG("processing byte: %u\n", byte);
 	}
     process_block(buf+curr_idx-64);
 
