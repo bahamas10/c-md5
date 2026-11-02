@@ -36,17 +36,14 @@
 uint64_t g_byte_count = 0;
 bool g_debug = false;
 
-uint8_t g_block[64] = {0};
-unsigned int g_block_idx = 0;
-
-uint32_t s[] = {
+const uint32_t s[] = {
 	7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,
 	5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,
 	4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,
 	6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,
 };
 
-uint32_t K[] = {
+const uint32_t K[] = {
 	0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
 	0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
 	0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
@@ -70,7 +67,7 @@ uint32_t b0 = 0xefcdab89;
 uint32_t c0 = 0x98badcfe;
 uint32_t d0 = 0x10325476;
 
-void process_block() {
+void process_block(uint8_t block[64]) {
 	DEBUG("processing block\n");
 
 	uint32_t M[16];
@@ -78,8 +75,8 @@ void process_block() {
 	// break chunk into sixteen 32-bit words M[j], 0 ≤ j ≤ 15
 	for (int i = 0; i < 16; i++) {
 		int j = i * 4;
-		M[i] = g_block[j]         | g_block[j+1] << 8 |
-		       g_block[j+2] << 16 | g_block[j+3] << 24;
+		M[i] = block[j]         | block[j+1] << 8 |
+		       block[j+2] << 16 | block[j+3] << 24;
 	}
 
 	// Initialize hash value for this chunk:
@@ -89,23 +86,40 @@ void process_block() {
 	uint32_t D = d0;
 
 	// Main loop:
-	for (int i = 0; i < 64; i++) {
-		uint32_t F, g;
+	uint32_t F, g;
+	for (int i = 0; i < 16; i++) {
+        F = (B & C) | ((~B) & D);
+        g = i;
+		F = F + A + K[i] + M[g];
+		A = D;
+		D = C;
+		C = B;
 
-		if (i < 16) {
-			F = (B & C) | ((~B) & D);
-			g = i;
-		} else if (i < 32) {
-			F = (D & B) | ((~D) & C);
-			g = (5 * i + 1) % 16;
-		} else if (i < 48) {
-			F = B ^ C ^ D;
-			g = (3 * i + 5) % 16;
-		} else {
-			F = C ^ (B | ~D);
-			g = (7 * i) % 16;
-		}
+		B += (F << s[i]) | (F >> (32 - s[i]));
+	}
+	for (int i = 16; i < 32; i++) {
+        F = (D & B) | ((~D) & C);
+        g = (5 * i + 1) % 16;
+		F = F + A + K[i] + M[g];
+		A = D;
+		D = C;
+		C = B;
 
+		B += (F << s[i]) | (F >> (32 - s[i]));
+	}
+	for (int i = 32; i < 48; i++) {
+        F = B ^ C ^ D;
+        g = (3 * i + 5) % 16;
+		F = F + A + K[i] + M[g];
+		A = D;
+		D = C;
+		C = B;
+
+		B += (F << s[i]) | (F >> (32 - s[i]));
+	}
+	for (int i = 48; i < 64; i++) {
+        F = C ^ (B | ~D);
+        g = (7 * i) % 16;
 		F = F + A + K[i] + M[g];
 		A = D;
 		D = C;
@@ -120,25 +134,15 @@ void process_block() {
 	d0 += D;
 }
 
-inline void process_byte(uint8_t byte) {
-	DEBUG("processing byte: %u\n", byte);
-
-	// store the byte
-	g_block[g_block_idx++] = byte;
-
-	// check if we have a full block ready for processing
-	if (g_block_idx == 64) {
-		process_block();
-		g_block_idx = 0;
-	}
-}
 
 // returns 0 on success, -1 on failure
 int process_input(int fd) {
+    ssize_t n;
+	uint8_t buf[64 * 4096];
+    ssize_t curr_idx = 0;
 	while (true) {
 		// read data from the fd
-		uint8_t buf[64 * 4096];
-		ssize_t n = read(fd, buf, sizeof (buf));
+		n = read(fd, buf+curr_idx, sizeof (buf)-curr_idx);
 
 		if (n == -1) {
 			// error
@@ -156,20 +160,34 @@ int process_input(int fd) {
 
 		// positive-number we read some stuff
 		// loop data byte-by-byte
-		for (int i = 0; i < n; i++) {
-			uint8_t byte = buf[i];
-			process_byte(byte);
-			g_byte_count++;
+        if (g_debug) {
+            for (int i=curr_idx; i<curr_idx+n; i++) {
+                DEBUG("processing byte: %u\n", buf[i]);
+            }
+        }
+		for (int i = curr_idx; i < curr_idx+n-63; i+=64) {
+            process_block(buf+i);
 		}
+        curr_idx += n;
+        if (curr_idx==sizeof(buf)) {
+            curr_idx = 0;
+        }
+        g_byte_count += n;
 	}
 
 	// we've read the entire message - now we have to finalize it by padding
 	// it and appending the length
-
 	// pad it with 1 and then a bunch of 0s
-	process_byte(0x80);
-	while (g_block_idx != 56) {
-		process_byte(0);
+	buf[curr_idx++] = 0x80;
+	DEBUG("processing byte: %u\n", 0x80);
+
+	// check if we have a full block ready for processing
+	if ((curr_idx%64) == 64) {
+		process_block(buf + curr_idx - 64);
+	}
+	while ((curr_idx%64) != 56) {
+        buf[curr_idx++] = 0;
+	    DEBUG("processing byte: %u\n", 0x0);
 	}
 
 	// append original length in bits mod 2^64 to message
@@ -179,11 +197,13 @@ int process_input(int fd) {
 	for (int i = 0; i < 8; i++) {
 		uint8_t byte = bits_count >> (i * 8);
 		DEBUG("bits_count[%d]=%u\n", i, byte);
-		process_byte(byte);
+        buf[curr_idx++] = byte;
+	    DEBUG("processing byte: %u\n", byte);
 	}
+    process_block(buf+curr_idx-64);
 
 	// assert things are correct
-	if (g_block_idx != 0) {
+	if ((curr_idx%64) != 0) {
 		fprintf(stderr, "uh oh lol bad block index\n");
 		return -1;
 	}
