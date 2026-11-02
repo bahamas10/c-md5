@@ -16,37 +16,43 @@
  * - Dave Eddy <ysap@daveeddy.com>
  */
 
-#include <errno.h>
-#include <fcntl.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/uio.h>
-#include <unistd.h>
+#define _CRT_SECURE_NO_WARNINGS /* Just a Windows thing. */
+
+#include <errno.h> /* errno */
+#include <stdbool.h> /* bool false true */
+#include <stddef.h>  /* size_t */
+#include <stdint.h> /* uint32_t uint64_t uint8_t */
+#include <stdio.h> /* fclose feof FILE fopen fprintf fread perror stderr stdin */
+#include <stdlib.h> /* getenv */
+#include <string.h> /* strerror */
+#ifdef _WIN32
+#include <fcntl.h> /* _setmode _O_BINARY */
+#include <io.h> /* _setmode _O_BINARY */
+#include <stdio.h> /* _fileno */
+#endif
 
 #define DEBUG(fmt, ...) do { \
 	if (g_debug) { \
-		fprintf(stderr, "[%d:%s()] ", __LINE__, __func__); \
+		fprintf(stderr, "[%d:%s()] ", (int)__LINE__, __func__); \
 		fprintf(stderr, fmt, ##__VA_ARGS__); \
 	} \
 } while (false)
 
+uint8_t g_buf[64 * 4096];
 uint64_t g_byte_count = 0;
 bool g_debug = false;
 
 uint8_t g_block[64] = {0};
 unsigned int g_block_idx = 0;
 
-uint32_t s[] = {
+int const s[] = {
 	7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,
 	5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,
 	4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,
 	6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,
 };
 
-uint32_t K[] = {
+uint32_t const K[] = {
 	0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
 	0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
 	0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
@@ -70,7 +76,7 @@ uint32_t b0 = 0xefcdab89;
 uint32_t c0 = 0x98badcfe;
 uint32_t d0 = 0x10325476;
 
-void process_block() {
+static void process_block(void) {
 	DEBUG("processing block\n");
 
 	uint32_t M[16];
@@ -78,8 +84,8 @@ void process_block() {
 	// break chunk into sixteen 32-bit words M[j], 0 ≤ j ≤ 15
 	for (int i = 0; i < 16; i++) {
 		int j = i * 4;
-		M[i] = g_block[j]         | g_block[j+1] << 8 |
-		       g_block[j+2] << 16 | g_block[j+3] << 24;
+		M[i] = ((uint32_t)(g_block[j]))         | ((uint32_t)(g_block[j+1])) << 8 |
+		       ((uint32_t)(g_block[j+2])) << 16 | ((uint32_t)(g_block[j+3])) << 24;
 	}
 
 	// Initialize hash value for this chunk:
@@ -89,7 +95,7 @@ void process_block() {
 	uint32_t D = d0;
 
 	// Main loop:
-	for (int i = 0; i < 64; i++) {
+	for (uint32_t i = 0; i < 64; i++) {
 		uint32_t F, g;
 
 		if (i < 16) {
@@ -120,7 +126,7 @@ void process_block() {
 	d0 += D;
 }
 
-inline void process_byte(uint8_t byte) {
+static inline void process_byte(uint8_t byte) {
 	DEBUG("processing byte: %u\n", byte);
 
 	// store the byte
@@ -134,30 +140,25 @@ inline void process_byte(uint8_t byte) {
 }
 
 // returns 0 on success, -1 on failure
-int process_input(int fd) {
+static int process_input(FILE *fd) {
 	while (true) {
 		// read data from the fd
-		uint8_t buf[64 * 4096];
-		ssize_t n = read(fd, buf, sizeof (buf));
+		size_t n = fread(g_buf, 1, sizeof (g_buf), fd);
 
-		if (n == -1) {
-			// error
-			switch (errno) {
-			case EINTR:
-				continue;
-			default:
+		if (n == 0) {
+			if (feof(fd) == 0) {
+				// error
 				perror("read");
 				return -1;
+			} else {
+				// we are done reading / EOF
+				break;
 			}
-		} else if (n == 0) {
-			// we are done reading / EOF
-			break;
 		}
-
 		// positive-number we read some stuff
 		// loop data byte-by-byte
-		for (int i = 0; i < n; i++) {
-			uint8_t byte = buf[i];
+		for (size_t i = 0; i < n; i++) {
+			uint8_t byte = g_buf[i];
 			process_byte(byte);
 			g_byte_count++;
 		}
@@ -177,7 +178,7 @@ int process_input(int fd) {
 
 	// encode the full 64bit int (bits length) as little endian
 	for (int i = 0; i < 8; i++) {
-		uint8_t byte = bits_count >> (i * 8);
+		uint8_t byte = (bits_count >> (i * 8)) & 0xff;
 		DEBUG("bits_count[%d]=%u\n", i, byte);
 		process_byte(byte);
 	}
@@ -191,14 +192,14 @@ int process_input(int fd) {
 	return 0;
 }
 
-void print_hash() {
+static void print_hash(void) {
 	uint32_t words[] = {a0, b0, c0, d0};
 
 	for (int i = 0; i < 4; i++) {
 		uint32_t word = words[i];
 
 		for (int j = 0; j < 4; j++) {
-			uint8_t byte = word >> (j*8);
+			uint8_t byte = (word >> (j*8)) & 0xff;
 			printf("%02x", byte);
 		}
 	}
@@ -208,25 +209,31 @@ void print_hash() {
 int main(int argc, char **argv) {
 	g_debug = getenv("DEBUG") != NULL;
 
-	int fd = 0;
-
+	FILE *fd = stdin;
 	// read from the file given as an argument
 	if (argc > 1) {
 		char *fname = argv[1];
 
 		DEBUG("opening file: %s\n", fname);
-		fd = open(fname, O_RDONLY);
+		fd = fopen(fname, "rb");
 
-		if (fd == -1) {
+		if (fd == NULL) {
 			perror("open");
 			return 1;
 		}
+	} else {
+		#ifdef _WIN32
+		if (_setmode(_fileno(stdin), _O_BINARY) == -1) {
+			perror("Could not re-open stdin in binary mode.");
+			return 1;
+		}
+		#endif
 	}
 
 	// fd is ready for reading
 	process_input(fd);
 
-	close(fd);
+	fclose(fd);
 
 	print_hash();
 
