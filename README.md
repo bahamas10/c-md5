@@ -19,8 +19,9 @@ YouTube
 
 Watch me build this live on YouTube.
 
-<a href="https://www.youtube.com/watch?v=s84F99Ae868"><img alt="C md5 YouTube
-Thumbnail" src="https://files.daveeddy.com/ysap/c-md5-thumbnail.jpg"
+<a href="https://www.youtube.com/watch?v=s84F99Ae868"><img
+alt="C md5 YouTube Thumbnail"
+src="https://i.ytimg.com/vi/s84F99Ae868/maxresdefault.jpg"
 /></a>
 
 License
