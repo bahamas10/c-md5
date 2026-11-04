@@ -23,8 +23,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <sys/uio.h>
 #include <unistd.h>
+
+#ifndef _WIN32
+#include <sys/uio.h>
+#endif
 
 #define DEBUG(fmt, ...) do { \
 	if (g_debug) { \
@@ -120,7 +123,7 @@ void process_block() {
 	d0 += D;
 }
 
-inline void process_byte(uint8_t byte) {
+static inline void process_byte(uint8_t byte) {
 	DEBUG("processing byte: %u\n", byte);
 
 	// store the byte
@@ -215,7 +218,7 @@ int main(int argc, char **argv) {
 		char *fname = argv[1];
 
 		DEBUG("opening file: %s\n", fname);
-		fd = open(fname, O_RDONLY);
+		fd = open(fname, O_RDONLY | O_BINARY);
 
 		if (fd == -1) {
 			perror("open");
