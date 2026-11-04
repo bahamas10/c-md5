@@ -27,6 +27,7 @@
 
 #ifndef _WIN32
 #include <sys/uio.h>
+#define O_BINARY 0
 #endif
 
 #define DEBUG(fmt, ...) do { \
